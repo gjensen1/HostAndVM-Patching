@@ -20,25 +20,6 @@ $ErrorActionPreference="Continue"
 $Global:Folder = $env:USERPROFILE+"\Documents\HostAndVM-Patching"
 
 
-
-#**********************
-# Function Shutdown-VMs
-#**********************
-Function Shutdown-VMs {
-    [CmdletBinding()]
-    Param($vmhost)
-    $vms = get-vmhost -Name $vmhost | get-vm | where {$_.PowerState -eq "PoweredOn"}
-    foreach ($vm in $vms) {
-        "Shutting Down $vm on $vmhost"
-        Shutdown-VMGuest -VM $vm -Confirm:$false >$null
-        }
-   # Sleep 60
-    
-}
-#*************************
-# EndFunction Shutdown-VMs
-#*************************
-
 #*****************
 # Get VC from User
 #*****************
@@ -79,25 +60,6 @@ Function Disconnect-VC {
 # EndFunction Disconnect-VC
 #**************************
 
-#*************************************************
-# Check for Folder Structure if not present create
-#*************************************************
-Function Verify-Folders {
-    [CmdletBinding()]
-    Param()
-    "Building Local folder structure" 
-    If (!(Test-Path $Global:Folder)) {
-        New-Item $Global:Folder -type Directory  > $null
-        }
-    If (!(Test-Path $Global:Folder\Temp)) {
-        New-Item $Global:Folder\Temp -type Directory  > $null
-        }
-    "Folder Structure built" 
-}
-#***************************
-# EndFunction Verify-Folders
-#***************************
-
 #**********************
 # Function Get-FileName
 #**********************
@@ -128,15 +90,38 @@ Function Read-TargetList {
 # EndFunction Read-TargetList
 #****************************
 
-#****************************
-# Function Initiate-HostScans
-#****************************
-Function Initiate-HostScans {
+#********************************
+# Function Attach-VUM-VMBaselines
+#********************************
+Function Attach-VUM-VMBaselines {
     [CmdletBinding()]
-    Param($vmHosts)
-    $taskTab = @{}
+    Param($VMHosts, $VMToolsBaseline, $VMHardwareBaseline)
     foreach($Name in $vmhosts){
-        $taskTab[(Scan-Inventory -entity $Name -RunAsync).Id] = $Name 
+        "Attaching VUM Baselines to VMs on $Name"
+        $VMs = Get-VMHost -Name $Name | Get-VM
+        #Attach Tools Baseline to VMs
+        $VMs | Attach-Baseline -Baseline $VMToolsBaseline
+        #Attach Hardware Baseline to VMs
+        $VMs | Attach-Baseline -Baseline $VMHardwareBaseline 
+    }
+}
+#***********************************
+# EndFunction Attach-VUM-VMBaselines
+#***********************************
+
+#**************************
+# Function Scan-VMInventory
+#**************************
+Function Scan-VMInventory {
+    [CmdletBinding()]
+    Param($VMHosts)
+    $taskTab = @{}
+    ForEach($Name in $VMHosts){
+        "Initiating VUM Scans for VMs on $Name"
+        $VMs = Get-VMHost -Name $Name | Get-VM
+        ForEach($VM in $VMs){
+            $taskTab[(Scan-Inventory -entity $VM -RunAsync).Id] = $VM
+        }
     }
     $totalTasks = $taskTab.Count
     $runningTasks = $taskTab.Count
@@ -152,91 +137,93 @@ Function Initiate-HostScans {
         Start-Sleep -Seconds 5
     }
     Write-Progress -Id 0 -Activity 'Scan tasks still running' -Completed
+
 }
-#*******************************
-# EndFunction Initiate-HostScans
-#*******************************
+#*****************************
+# EndFunction Scan-VMInventory
+#*****************************
 
-
-#********************
-# Function PatchHosts
-#********************
-Function PatchHost {
+#***************************
+# Function Remediate-VMTools
+#***************************
+Function Remediate-VMTools {
     [CmdletBinding()]
-    Param($vmHosts)
+    Param($VMHosts, $VMToolsBaseline)
     $taskTab = @{}
-    foreach($Name in $vmhosts){
-        "Initiate VM Shutdowns on $Name"
-        Store-PoweredOnVMs $Name
-        Shutdown-VMs $Name
-        "Put $Name in to Maintenance Mode"
-        Get-VMHost $Name | Set-VMHost -State Maintenance > $null
-        "Initiate Patching Job on $Name"
-        $taskTab[(Get-Baseline -Name "ESXi Patches" | Remediate-Inventory -entity $Name -Confirm:$false -runAsync).Id] = $Name 
-        "----------------------------------------------------------"
+    ForEach($Name in $VMHosts){
+        "Initiating VMTools Remediation for VMs on $Name"
+        $VMs = Get-VMHost -Name $Name | Get-VM
+        ForEach($VM in $VMs){
+            $taskTab[($VMToolsBaseline | Remediate-Inventory -entity $VM -Confirm:$false -RunAsync).Id] = $VM
+        }
     }
+    
     $totalTasks = $taskTab.Count
     $runningTasks = $taskTab.Count
     While($runningTasks -gt 0){
         Get-Task | % {
             if($taskTab.ContainsKey($_.ID) -and $_.State -eq "Success"){
-                $HostName = ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
-                "Patching complete on $HostName" 
-                "Taking $HostName out of Maintenance Mode"
-                Get-VMHost $HostName | Set-VMHost -State Connected > $null
-                Start-VMs $HostName
+                "Remediation complete on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
                 $taskTab.Remove($_.Id)
                 $runningTasks--
             }
+            elseIf($taskTab.ContainsKey($_.ID) -and $_.State -eq "Error"){
+                "Remediation Error on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
+                $taskTab.Remove($_.Id)
+                $runningTasks--       
+            }
         }
-        Write-Progress -Id 0 -Activity 'Patching tasks still running' -Status "$($runningTasks) task of $($totalTasks) still running" -PercentComplete (($runningTasks/$totalTasks) * 100)
+        Write-Progress -Id 0 -Activity 'Remediation tasks still running' -Status "$($runningTasks) task of $($totalTasks) still running" -PercentComplete (($runningTasks/$totalTasks) * 100)
         Start-Sleep -Seconds 5
     }
-    Write-Progress -Id 0 -Activity 'Patching tasks still running' -Completed
-}
-#*******************
-# Function PatchHost
-#*******************
+    Write-Progress -Id 0 -Activity 'Remediation tasks still running' -Completed
 
-#****************************
-# Function Store-PoweredOnVMs
-#****************************
-Function Store-PoweredOnVMs {
-    [CmdletBinding()]
-    Param($Target)
-    Get-VMHost -Name $Target | Get-VM | where {$_.PowerState -eq "PoweredOn"} | Select -expandProperty Name | Out-File $Global:Folder\temp\$Target.txt        
 }
-#*******************************
-# EndFunction Store-PoweredOnVMs
-#*******************************
+#******************************
+# EndFunction Remediate-VMTools
+#******************************
 
-#*******************
-# Function Start-VMs
-#*******************
-Function Start-VMs {
+#******************************
+# Function Remediate-VMHardware
+#******************************
+Function Remediate-VMHardware {
     [CmdletBinding()]
-    Param($Target)
-    $VMs = Get-Content $Global:Folder\Temp\$Target.txt
-    ForEach ($VM in $VMs){
-        "Starting $vm on $Target"
-        Start-VM -RunAsync -VM $VM -Confirm:$false >$null
+    Param($VMHosts, $VMHardwareBaseline)
+    $taskTab = @{}
+    ForEach($Name in $VMHosts){
+        "Initiating VMTools Remediation for VMs on $Name"
+        $VMs = Get-VMHost -Name $Name | Get-VM
+        ForEach($VM in $VMs){
+            $taskTab[($VMHardwareBaseline | Remediate-Inventory -entity $VM -Confirm:$false -RunAsync).Id] = $VM
+        }
     }
-}
-#**********************
-# EndFunction Start-VMs
-#**********************
+    
+    $totalTasks = $taskTab.Count
+    $runningTasks = $taskTab.Count
+    While($runningTasks -gt 0){
+        Get-Task | % {
+            if($taskTab.ContainsKey($_.ID) -and $_.State -eq "Success"){
+                "Remediation complete on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
+                $taskTab.Remove($_.Id)
+                $runningTasks--
+            }
+            elseIf($taskTab.ContainsKey($_.ID) -and $_.State -eq "Error"){
+                "Remediation Error on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
+                $taskTab.Remove($_.Id)
+                $runningTasks--       
+            }
+        }
+        Write-Progress -Id 0 -Activity 'Remediation tasks still running' -Status "$($runningTasks) task of $($totalTasks) still running" -PercentComplete (($runningTasks/$totalTasks) * 100)
+        Start-Sleep -Seconds 5
+    }
+    Write-Progress -Id 0 -Activity 'Remediation tasks still running' -Completed
 
-#******************
-# Function Clean-Up
-#******************
-Function Clean-Up {
-    [CmdletBinding()]
-    Param()
-    Remove-Item $Global:Folder\Temp -Force -Recurse > $null
 }
-#*********************
-# EndFunction Clean-Up
-#*********************
+#*********************************
+# EndFunction Remediate-VMHardware
+#*********************************
+
+
 
 #***************
 # Execute Script
@@ -252,24 +239,27 @@ $Global:Creds = Get-Credential -Credential $null
 Get-VCenter
 Connect-VC
 "=========================================================="
-Verify-Folders
-"=========================================================="
 "Get Target List"
 $inputFile = Get-FileName $Global:Folder
 "=========================================================="
 "Reading Target List"
 $VMHostList = Read-TargetList $inputFile
 "=========================================================="
-"Initiate Scanning for required Patches on Hosts" 
-"and waiting for completion"
+#Define Baselines for use later
+$VMToolsBaseline = Get-Baseline -Name "VMware Tools Upgrade to Match Host*"
+$VMHardwareBaseline = Get-Baseline -Name "VM Hardware Upgrade*"
+"Attach VUM Baselines to VMs"
+Attach-VUM-VMBaselines $VMHostList $VMToolsBaseline $VMHardwareBaseline
 "=========================================================="
-Initiate-HostScans $VMHostList
-"----------------------------------------------------------"
-"Initiate Patching on Hosts"
+"Scan VMs for VUM Updates"
+Scan-VMInventory $VMHostList 
 "=========================================================="
-PatchHost $VMHostList
-"----------------------------------------------------------"
-Clean-Up
-
-
-Disconnect-VC
+"Remediate VMTools on VMs"
+Remediate-VMTools $VMHostList $VMToolsBaseline
+"=========================================================="
+"Re-Scan VMs for VUM Updates to activate Hardware Baseline"
+Scan-VMInventory $VMHostList 
+"=========================================================="
+"Remediate VMHardware on VMs"
+Remediate-VMHardware $VMHostList $VMHardwareBaseline
+"=========================================================="
