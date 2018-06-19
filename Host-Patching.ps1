@@ -1,4 +1,8 @@
-﻿# +------------------------------------------------------+
+﻿param(
+    [Parameter(Mandatory=$true)][String]$vCenter
+    )
+
+<# +------------------------------------------------------+
 # |        Load VMware modules if not loaded             |
 # +------------------------------------------------------+
 "Loading VMWare Modules"
@@ -13,6 +17,7 @@ if ( !(Get-Module -Name VMware.VimAutomation.Core -ErrorAction SilentlyContinue)
     . (join-path -path (Get-ItemProperty  $Regkey).InstallPath -childpath 'Scripts\Initialize-PowerCLIEnvironment.ps1')
 }
 $ErrorActionPreference="Continue"
+#>
 
 # -----------------------
 # Define Global Variables
@@ -60,7 +65,8 @@ Function Connect-VC {
     [CmdletBinding()]
     Param()
     "Connecting to $Global:VCName"
-    Connect-VIServer $Global:VCName -Credential $Global:Creds -WarningAction SilentlyContinue
+    #Connect-VIServer $Global:VCName -Credential $Global:Creds -WarningAction SilentlyContinue
+    Connect-VIServer $Global:VCName -WarningAction SilentlyContinue
 }
 #***********************
 # EndFunction Connect-VC
@@ -246,10 +252,11 @@ $ErrorActionPreference="SilentlyContinue"
 
 "=========================================================="
 " "
-Write-Host "Get CIHS credentials" -ForegroundColor Yellow
-$Global:Creds = Get-Credential -Credential $null
+#Write-Host "Get CIHS credentials" -ForegroundColor Yellow
+#$Global:Creds = Get-Credential -Credential $null
 
-Get-VCenter
+#Get-VCenter
+$Global:VCName = $vCenter
 Connect-VC
 "=========================================================="
 Verify-Folders
