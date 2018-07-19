@@ -1,38 +1,34 @@
-﻿# +------------------------------------------------------+
-# |        Load VMware modules if not loaded             |
-# +------------------------------------------------------+
-"Loading VMWare Modules"
-$ErrorActionPreference="SilentlyContinue" 
-if ( !(Get-Module -Name VMware.VimAutomation.Core -ErrorAction SilentlyContinue) ) {
-    if (Test-Path -Path 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\VMware, Inc.\VMware vSphere PowerCLI' ) {
-        $Regkey = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\VMware, Inc.\VMware vSphere PowerCLI'
-       
-    } else {
-        $Regkey = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\VMware, Inc.\VMware vSphere PowerCLI'
-    }
-    . (join-path -path (Get-ItemProperty  $Regkey).InstallPath -childpath 'Scripts\Initialize-PowerCLIEnvironment.ps1')
-}
-$ErrorActionPreference="Continue"
+﻿param(
+    [Parameter(Mandatory=$true)][String]$vCenter
+    )
+
 
 # -----------------------
 # Define Global Variables
 # -----------------------
-$Global:Folder = $env:USERPROFILE+"\Documents\HostAndVM-Patching"
+$Global:Folder = $env:USERPROFILE+"\Documents\HostRemediation\VM-Patching"
 
-
-#*****************
-# Get VC from User
-#*****************
-Function Get-VCenter {
+#**************************
+# Function Check-PowerCLI10 
+#**************************
+Function Check-PowerCLI10 {
     [CmdletBinding()]
     Param()
-    #Prompt User for vCenter
-    Write-Host "Enter the FQHN of the vCenter containing the target Hosts: " -ForegroundColor "Yellow" -NoNewline
-    $Global:VCName = Read-Host 
+    #Check for Prereqs for the script
+    #This includes, PowerCLI 10, plink, and pscp
+
+    #Check for PowerCLI 10
+    $powercli = Get-Module -ListAvailable VMware.PowerCLI
+    if (!($powercli.version.Major -eq "10")) {
+        Throw "VMware PowerCLI 10 is not installed on your system!!!"
+    }
+    Else {
+        Write-Host "PowerCLI 10 is Installed" -ForegroundColor Green
+    } 
 }
-#*******************
-# EndFunction Get-VC
-#*******************
+#*****************************
+# EndFunction Check-PowerCLI10
+#*****************************
 
 #*******************
 # Connect to vCenter
@@ -59,6 +55,37 @@ Function Disconnect-VC {
 #**************************
 # EndFunction Disconnect-VC
 #**************************
+
+#*************************************************
+# Check for Folder Structure if not present create
+#*************************************************
+Function Verify-Folders {
+    [CmdletBinding()]
+    Param()
+    "Building Local folder structure" 
+    If (!(Test-Path $Global:Folder)) {
+        New-Item $Global:Folder -type Directory  > $null
+        }
+    If (!(Test-Path $Global:Folder\Temp)) {
+        New-Item $Global:Folder\Temp -type Directory  > $null
+        }
+    "Folder Structure built" 
+}
+#***************************
+# EndFunction Verify-Folders
+#***************************
+
+#****************************
+# Function Store-PoweredOnVMs
+#****************************
+Function Store-PoweredOnVMs {
+    [CmdletBinding()]
+    Param($Target)
+    Get-VMHost -Name $Target | Get-VM | where {$_.PowerState -eq "PoweredOn"} | Select -expandProperty Name | Out-File $Global:Folder\temp\$Target.txt        
+}
+#*******************************
+# EndFunction Store-PoweredOnVMs
+#*******************************
 
 #**********************
 # Function Get-FileName
@@ -151,6 +178,7 @@ Function Remediate-VMTools {
     Param($VMHosts, $VMToolsBaseline)
     $taskTab = @{}
     ForEach($Name in $VMHosts){
+        Store-PoweredOnVMs $Name
         "Initiating VMTools Remediation for VMs on $Name"
         $VMs = Get-VMHost -Name $Name | Get-VM
         ForEach($VM in $VMs){
@@ -229,6 +257,12 @@ Function Remediate-VMHardware {
 # Execute Script
 #***************
 CLS
+"=========================================================="
+#Verify all require software is installed
+"Checking for required Software on your system"
+"=========================================================="
+Check-PowerCLI10
+Verify-Folders
 $ErrorActionPreference="SilentlyContinue"
 
 "=========================================================="
@@ -236,7 +270,7 @@ $ErrorActionPreference="SilentlyContinue"
 Write-Host "Get CIHS credentials" -ForegroundColor Yellow
 $Global:Creds = Get-Credential -Credential $null
 
-Get-VCenter
+$Global:VCName = $vCenter
 Connect-VC
 "=========================================================="
 "Get Target List"

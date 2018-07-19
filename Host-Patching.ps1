@@ -2,29 +2,32 @@
     [Parameter(Mandatory=$true)][String]$vCenter
     )
 
-<# +------------------------------------------------------+
-# |        Load VMware modules if not loaded             |
-# +------------------------------------------------------+
-"Loading VMWare Modules"
-$ErrorActionPreference="SilentlyContinue" 
-if ( !(Get-Module -Name VMware.VimAutomation.Core -ErrorAction SilentlyContinue) ) {
-    if (Test-Path -Path 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\VMware, Inc.\VMware vSphere PowerCLI' ) {
-        $Regkey = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\VMware, Inc.\VMware vSphere PowerCLI'
-       
-    } else {
-        $Regkey = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\VMware, Inc.\VMware vSphere PowerCLI'
-    }
-    . (join-path -path (Get-ItemProperty  $Regkey).InstallPath -childpath 'Scripts\Initialize-PowerCLIEnvironment.ps1')
-}
-$ErrorActionPreference="Continue"
-#>
-
 # -----------------------
 # Define Global Variables
 # -----------------------
-$Global:Folder = $env:USERPROFILE+"\Documents\HostAndVM-Patching"
+$Global:Folder = $env:USERPROFILE+"\Documents\HostRemediation\VMHost-Patching"
 
+#**************************
+# Function Check-PowerCLI10 
+#**************************
+Function Check-PowerCLI10 {
+    [CmdletBinding()]
+    Param()
+    #Check for Prereqs for the script
+    #This includes, PowerCLI 10, plink, and pscp
 
+    #Check for PowerCLI 10
+    $powercli = Get-Module -ListAvailable VMware.PowerCLI
+    if (!($powercli.version.Major -eq "10")) {
+        Throw "VMware PowerCLI 10 is not installed on your system!!!"
+    }
+    Else {
+        Write-Host "PowerCLI 10 is Installed" -ForegroundColor Green
+    } 
+}
+#*****************************
+# EndFunction Check-PowerCLI10
+#*****************************
 
 #**********************
 # Function Shutdown-VMs
@@ -65,8 +68,8 @@ Function Connect-VC {
     [CmdletBinding()]
     Param()
     "Connecting to $Global:VCName"
-    #Connect-VIServer $Global:VCName -Credential $Global:Creds -WarningAction SilentlyContinue
-    Connect-VIServer $Global:VCName -WarningAction SilentlyContinue
+    Connect-VIServer $Global:VCName -Credential $Global:Creds -WarningAction SilentlyContinue
+    #Connect-VIServer $Global:VCName -WarningAction SilentlyContinue
 }
 #***********************
 # EndFunction Connect-VC
@@ -248,12 +251,18 @@ Function Clean-Up {
 # Execute Script
 #***************
 CLS
+"=========================================================="
+#Verify all require software is installed
+"Checking for required Software on your system"
+"=========================================================="
+Check-PowerCLI10
+
 $ErrorActionPreference="SilentlyContinue"
 
 "=========================================================="
 " "
-#Write-Host "Get CIHS credentials" -ForegroundColor Yellow
-#$Global:Creds = Get-Credential -Credential $null
+Write-Host "Get CIHS credentials" -ForegroundColor Yellow
+$Global:Creds = Get-Credential -Credential $null
 
 #Get-VCenter
 $Global:VCName = $vCenter
