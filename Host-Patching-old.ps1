@@ -156,11 +156,6 @@ Function Initiate-HostScans {
                 $taskTab.Remove($_.Id)
                 $runningTasks--
             }
-            elseIf($taskTab.ContainsKey($_.ID) -and $_.State -eq "Error"){
-                "Scanning Error on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
-                $taskTab.Remove($_.Id)
-                $runningTasks--       
-            }
         }
         Write-Progress -Id 0 -Activity 'Scan tasks still running' -Status "$($runningTasks) task of $($totalTasks) still running" -PercentComplete (($runningTasks/$totalTasks) * 100)
         Start-Sleep -Seconds 5
@@ -201,11 +196,6 @@ Function PatchHost {
                 Start-VMs $HostName
                 $taskTab.Remove($_.Id)
                 $runningTasks--
-            }
-            elseIf($taskTab.ContainsKey($_.ID) -and $_.State -eq "Error"){
-                "Patching Error on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
-                $taskTab.Remove($_.Id)
-                $runningTasks--       
             }
         }
         Write-Progress -Id 0 -Activity 'Patching tasks still running' -Status "$($runningTasks) task of $($totalTasks) still running" -PercentComplete (($runningTasks/$totalTasks) * 100)
@@ -261,13 +251,6 @@ Function Clean-Up {
 # Execute Script
 #***************
 CLS
-$ErrorActionPreference="SilentlyContinue"
-Stop-Transcript | out-null
-$ErrorActionPreference="Continue"
-Start-Transcript -path $Global:Folder\HostPatching-Log-$(Get-Date -Format yyyy-MM-dd-hh-mm-tt).txt
-
-
-
 "=========================================================="
 #Verify all require software is installed
 "Checking for required Software on your system"
@@ -306,4 +289,3 @@ PatchHost $VMHostList
 
 
 Disconnect-VC
-Stop-Transcript

@@ -159,6 +159,11 @@ Function Scan-VMInventory {
                 $taskTab.Remove($_.Id)
                 $runningTasks--
             }
+            elseIf($taskTab.ContainsKey($_.ID) -and $_.State -eq "Error"){
+                "Scanning Error on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
+                $taskTab.Remove($_.Id)
+                $runningTasks--       
+            }
         }
         Write-Progress -Id 0 -Activity 'Scan tasks still running' -Status "$($runningTasks) task of $($totalTasks) still running" -PercentComplete (($runningTasks/$totalTasks) * 100)
         Start-Sleep -Seconds 5
@@ -191,12 +196,12 @@ Function Remediate-VMTools {
     While($runningTasks -gt 0){
         Get-Task | % {
             if($taskTab.ContainsKey($_.ID) -and $_.State -eq "Success"){
-                "Remediation complete on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
+                "VMTools Remediation complete on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
                 $taskTab.Remove($_.Id)
                 $runningTasks--
             }
             elseIf($taskTab.ContainsKey($_.ID) -and $_.State -eq "Error"){
-                "Remediation Error on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
+                "VMTools Remediation Error on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
                 $taskTab.Remove($_.Id)
                 $runningTasks--       
             }
@@ -219,7 +224,7 @@ Function Remediate-VMHardware {
     Param($VMHosts, $VMHardwareBaseline)
     $taskTab = @{}
     ForEach($Name in $VMHosts){
-        "Initiating VMTools Remediation for VMs on $Name"
+        "Initiating VMHardware Remediation for VMs on $Name"
         $VMs = Get-VMHost -Name $Name | Get-VM
         ForEach($VM in $VMs){
             $taskTab[($VMHardwareBaseline | Remediate-Inventory -entity $VM -Confirm:$false -RunAsync).Id] = $VM
@@ -231,12 +236,12 @@ Function Remediate-VMHardware {
     While($runningTasks -gt 0){
         Get-Task | % {
             if($taskTab.ContainsKey($_.ID) -and $_.State -eq "Success"){
-                "Remediation complete on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
+                "VMHardware Remediation complete on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
                 $taskTab.Remove($_.Id)
                 $runningTasks--
             }
             elseIf($taskTab.ContainsKey($_.ID) -and $_.State -eq "Error"){
-                "Remediation Error on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
+                "VMHardware Remediation Error on "+ ($_.ObjectID | Get-VIObjectByVIView | Select -expandproperty Name)
                 $taskTab.Remove($_.Id)
                 $runningTasks--       
             }
@@ -257,6 +262,10 @@ Function Remediate-VMHardware {
 # Execute Script
 #***************
 CLS
+$ErrorActionPreference="SilentlyContinue"
+Stop-Transcript | out-null
+$ErrorActionPreference="Continue"
+Start-Transcript -path $Global:Folder\VMPatching-Log-$(Get-Date -Format yyyy-MM-dd-hh-mm-tt).txt
 "=========================================================="
 #Verify all require software is installed
 "Checking for required Software on your system"
